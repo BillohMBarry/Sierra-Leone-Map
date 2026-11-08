@@ -38,3 +38,9 @@
 .brand span {
   color: #227b64;
 }
+
+.map-study-feature:focus-visible {
+  filter: drop-shadow(0 0 3px #f97316);
+  outline: 2px solid #f97316;
+  outline-offset: 3px;
+}
