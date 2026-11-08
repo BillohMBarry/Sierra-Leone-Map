@@ -2,7 +2,10 @@ import React, { useMemo, useRef, useState } from 'react';
 import {
   Activity,
   Compass as CompassIcon,
+  BookOpen,
+  Gem,
   HeartPulse,
+  Landmark,
   Map as MapIcon,
   Minus,
   Pause,
@@ -11,15 +14,22 @@ import {
   Radio,
   RefreshCw,
   Sprout,
+  Waves,
   Zap,
 } from 'lucide-react';
 import { CityData, ProvinceData, RegionId } from '../data/sierraLeoneData';
+import {
+  EDUCATION_TOPICS,
+  EducationStudyItem,
+  EducationTopicId,
+} from '../data/educationData';
 import {
   DISTRICT_GEOJSON,
   INTERNATIONAL_BORDER_GEOJSON,
   MAJOR_RIVERS_GEOJSON,
   ringToSvgPath,
   ringsToSvgPath,
+  projectLngLat,
   unprojectPoint,
   WEST_AFRICA_LAND_RING,
 } from '../data/sierraLeoneGeoJson';
@@ -41,11 +51,18 @@ interface InteractiveMapProps {
   telemetryStore: TelemetryStore;
   isStreamActive: boolean;
   isDetailOpen: boolean;
+  mode: 'political' | 'study';
+  studyTopic: EducationTopicId | null;
+  studyItems: EducationStudyItem[];
+  selectedStudyItemId: string | null;
   onSelectCity: (cityId: string) => void;
   onSelectProvince: (provinceId: RegionId) => void;
   onSelectLayer: (layerId: DataLayerId) => void;
   onToggleStream: () => void;
   onPulseTelemetry: () => void;
+  onSelectMode: (mode: 'political' | 'study') => void;
+  onSelectStudyTopic: (topicId: EducationTopicId) => void;
+  onSelectStudyItem: (itemId: string) => void;
 }
 
 const LAYER_ICONS: Record<DataLayerId, React.FC<{ className?: string }>> = {
@@ -73,11 +90,18 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   telemetryStore,
   isStreamActive,
   isDetailOpen,
+  mode,
+  studyTopic,
+  studyItems,
+  selectedStudyItemId,
   onSelectCity,
   onSelectProvince,
   onSelectLayer,
   onToggleStream,
   onPulseTelemetry,
+  onSelectMode,
+  onSelectStudyTopic,
+  onSelectStudyItem,
 }) => {
   const [zoom, setZoom] = useState<number>(1);
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -95,6 +119,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   const didMoveRef = useRef<boolean>(false);
 
   const activeLayerDef = useMemo(() => getLayerDefinition(activeLayer), [activeLayer]);
+  const visibleLayer = mode === 'study' ? 'political' : activeLayer;
 
   const westAfricaLandPath = useMemo(() => ringToSvgPath(WEST_AFRICA_LAND_RING, true), []);
   const internationalBorderPath = useMemo(
@@ -114,9 +139,29 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     () =>
       MAJOR_RIVERS_GEOJSON.map((river) => ({
         name: river.name,
+        coordinates: river.coordinates,
         d: ringToSvgPath(river.coordinates, false),
       })),
     []
+  );
+  const studyRiverPaths = useMemo(
+    () =>
+      studyItems.flatMap((item) => {
+        if (item.topicId !== 'rivers' || !item.riverName) return [];
+        const river = riverPaths.find((path) => path.name === item.riverName);
+        return river ? [{ ...item, d: river.d }] : [];
+      }),
+    [riverPaths, studyItems]
+  );
+  const selectedRiver = studyRiverPaths.find((river) => river.id === selectedStudyItemId);
+  const studyPointItems = useMemo(
+    () =>
+      studyItems.flatMap((item) => {
+        if (!item.coordinates) return [];
+        const [x, y] = projectLngLat(item.coordinates[0], item.coordinates[1]);
+        return [{ ...item, x, y }];
+      }),
+    [studyItems]
   );
 
   const handleZoomIn = () => {
@@ -138,7 +183,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if ((e.target as HTMLElement).closest('button')) return;
+    if ((e.target as HTMLElement).closest('button, [data-map-feature]')) return;
     setIsDragging(true);
     didMoveRef.current = false;
     setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
@@ -210,11 +255,70 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
       {/* Floating Data Layer Switcher & Live Telemetry Stream Bar */}
       <div
         role="toolbar"
-        aria-label="Data Layer Switcher and Telemetry Stream Controls"
-        className={`absolute top-3 left-[76px] z-20 flex items-center gap-1.5 flex-nowrap transition-all duration-200 ${
-          isDetailOpen ? 'right-[364px]' : 'right-5'
+        aria-label={mode === 'study' ? 'Study map controls' : 'Map mode and telemetry controls'}
+        className={`absolute top-3 left-[76px] z-20 flex items-start gap-1.5 transition-all duration-200 ${
+          mode === 'study' ? 'flex-col' : 'flex-row'
+        } ${
+          isDetailOpen ? 'right-3 md:right-[364px]' : 'right-5'
         }`}
       >
+        <div className="flex items-center gap-0.5 bg-white/95 backdrop-blur-xs p-1 rounded-2xl shadow-md border border-slate-200/85 shrink-0">
+          {([
+            { id: 'political', label: 'Political' },
+            { id: 'study', label: 'Study' },
+          ] as const).map((view) => (
+            <button
+              key={view.id}
+              type="button"
+              onClick={() => onSelectMode(view.id)}
+              aria-pressed={mode === view.id}
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[11.5px] font-semibold whitespace-nowrap transition-all ${
+                mode === view.id
+                  ? 'bg-[#0d3b2e] text-white shadow-2xs'
+                  : 'text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              {view.id === 'study' && <BookOpen className="w-3.5 h-3.5" aria-hidden="true" />}
+              <span>{view.label}</span>
+            </button>
+          ))}
+        </div>
+        {mode === 'study' ? (
+          <div
+            role="group"
+            aria-label="Study topics"
+            className="flex w-full flex-wrap items-center gap-0.5 bg-white/95 backdrop-blur-xs p-1 rounded-2xl shadow-md border border-slate-200/85"
+          >
+            {EDUCATION_TOPICS.map((topic) => {
+              const isActive = studyTopic === topic.id;
+              const TopicIcon =
+                topic.id === 'rivers'
+                  ? Waves
+                  : topic.id === 'agriculture'
+                    ? Sprout
+                    : topic.id === 'minerals'
+                      ? Gem
+                      : topic.id === 'landmarks'
+                        ? Landmark
+                        : MapIcon;
+              return (
+                <button
+                  key={topic.id}
+                  type="button"
+                  onClick={() => onSelectStudyTopic(topic.id)}
+                  aria-pressed={isActive}
+                  className={`flex items-center gap-1 px-2 py-1 rounded-xl text-[11px] font-semibold whitespace-nowrap transition-all ${
+                    isActive ? 'bg-emerald-800 text-white' : 'text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  <TopicIcon className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>{topic.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <>
         <div className="flex items-center gap-0.5 bg-white/95 backdrop-blur-xs p-1 rounded-2xl shadow-md border border-slate-200/85">
           {DATA_LAYERS.map((layer) => {
             const Icon = LAYER_ICONS[layer.id];
@@ -270,6 +374,8 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             <span>Pulse</span>
           </button>
         </div>
+          </>
+        )}
       </div>
 
       {/* Interactive Zoomable & Pannable Projected GeoJSON Map Stage */}
@@ -287,9 +393,14 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           <svg
             ref={svgRef}
             viewBox="0 0 850 1024"
+            preserveAspectRatio="xMidYMid meet"
             onClick={handleSvgClick}
             className="w-full h-full block overflow-visible"
-            aria-label="Interactive Projected GeoJSON Political Map of Sierra Leone"
+            aria-label={
+              mode === 'study'
+                ? 'Interactive Study Map of Sierra Leone'
+                : 'Interactive Projected GeoJSON Political Map of Sierra Leone'
+            }
           >
             <defs>
               <filter id="coastal-glow" x="-10%" y="-10%" width="120%" height="120%">
@@ -397,12 +508,19 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
               {provinces.map((prov) => {
                 const isSelected = selectedProvinceId === prov.id;
                 const isHovered = hoveredProvinceId === prov.id;
-                const isDimmed = selectedProvinceId && selectedProvinceId !== prov.id;
+                const isRiverRegion =
+                  mode === 'study' &&
+                  studyTopic === 'rivers' &&
+                  selectedRiver?.relatedRegionIds?.includes(prov.id);
+                const isDimmed =
+                  selectedProvinceId &&
+                  selectedProvinceId !== prov.id &&
+                  !isRiverRegion;
 
                 const metricData =
-                  activeLayer !== 'political' ? telemetryStore[prov.id][activeLayer] : null;
+                  visibleLayer !== 'political' ? telemetryStore[prov.id][visibleLayer] : null;
                 const choropleth = resolveChoroplethStyle(
-                  activeLayer,
+                  visibleLayer,
                   metricData ? metricData.primaryScore : 0,
                   prov.mapFillColor
                 );
@@ -411,10 +529,10 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                   <path
                     key={prov.id}
                     d={prov.svgPath}
-                    fill={choropleth.fillColor}
-                    fillOpacity={isDimmed ? 0.55 : 1}
-                    stroke="#ffffff"
-                    strokeWidth={isSelected ? 3 : isHovered ? 2.5 : 1.8}
+                    fill={isRiverRegion ? '#fbbf24' : choropleth.fillColor}
+                    fillOpacity={isDimmed ? 0.55 : isRiverRegion ? 0.82 : 1}
+                    stroke={isRiverRegion ? '#c2410c' : '#ffffff'}
+                    strokeWidth={isRiverRegion ? 3.5 : isSelected ? 3 : isHovered ? 2.5 : 1.8}
                     strokeLinejoin="round"
                     onMouseEnter={() => setHoveredProvinceId(prov.id)}
                     onMouseLeave={() => setHoveredProvinceId(null)}
@@ -439,7 +557,9 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                     className="cursor-pointer transition-colors duration-200"
                   >
                     <title>
-                      {metricData
+                      {isRiverRegion
+                        ? `${prov.name} — crossed by the selected approximate river trace`
+                        : metricData
                         ? `${prov.name} — ${activeLayerDef.primaryMetricLabel}: ${metricData.primaryScore.toFixed(1)}% (${metricData.statusLabel})`
                         : `${prov.name} — Capital: ${prov.capitalName} | Pop: ${prov.population} | Area: ${prov.areaKm2}`}
                     </title>
@@ -466,11 +586,13 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             )}
 
             {/* 5. Major Rivers of Sierra Leone (Projected WGS84) */}
-            <g pointerEvents="none" fill="none" stroke="#64b5f6" strokeWidth="1.35" opacity="0.75">
-              {riverPaths.map((river) => (
-                <path key={river.name} d={river.d} strokeLinecap="round" strokeLinejoin="round" />
-              ))}
-            </g>
+            {mode === 'political' && (
+              <g pointerEvents="none" fill="none" stroke="#64b5f6" strokeWidth="1.35" opacity="0.75">
+                {riverPaths.map((river) => (
+                  <path key={river.name} d={river.d} strokeLinecap="round" strokeLinejoin="round" />
+                ))}
+              </g>
+            )}
 
             {/* 6. Re-stroke Internal Province Boundaries */}
             <g pointerEvents="none">
@@ -509,9 +631,9 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                     : [prov.shortName.toUpperCase(), 'PROVINCE'];
 
                 const metricData =
-                  activeLayer !== 'political' ? telemetryStore[prov.id][activeLayer] : null;
+                  visibleLayer !== 'political' ? telemetryStore[prov.id][visibleLayer] : null;
                 const choropleth = resolveChoroplethStyle(
-                  activeLayer,
+                  visibleLayer,
                   metricData ? metricData.primaryScore : 0,
                   prov.mapFillColor
                 );
@@ -683,8 +805,8 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             {/* 10. Floating Active City Callout Pill at Projected GPS Coordinates */}
             {(() => {
               const activeMetric =
-                activeLayer !== 'political'
-                  ? telemetryStore[selectedCity.regionId][activeLayer]
+                visibleLayer !== 'political'
+                  ? telemetryStore[selectedCity.regionId][visibleLayer]
                   : null;
               const pillLabel = activeMetric
                 ? `${selectedCity.name} · ${activeMetric.primaryScore.toFixed(1)}%`
@@ -735,6 +857,104 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                 </g>
               );
             })()}
+
+            {mode === 'study' && studyTopic === 'rivers' && (
+              <g fill="none">
+                {studyRiverPaths.map((river) => {
+                  const isSelected = river.id === selectedStudyItemId;
+                  return (
+                    <g
+                      key={river.id}
+                      data-map-feature
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Study river: ${river.name}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onSelectStudyItem(river.id);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          onSelectStudyItem(river.id);
+                        }
+                      }}
+                      className="map-study-feature cursor-pointer"
+                    >
+                      <title>{river.name} — prototype study path</title>
+                      <path d={river.d} stroke="transparent" strokeWidth="14" pointerEvents="stroke" />
+                      <path
+                        d={river.d}
+                        stroke={isSelected ? '#f97316' : '#087e8b'}
+                        strokeWidth={isSelected ? 3.8 : 2.8}
+                        strokeDasharray={river.id === 'river-mano' ? '6 4' : undefined}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        pointerEvents="none"
+                      />
+                    </g>
+                  );
+                })}
+              </g>
+            )}
+
+            {mode === 'study' && studyTopic !== 'rivers' && (
+              <g fontFamily="Plus Jakarta Sans, sans-serif">
+                {studyPointItems.map((item) => {
+                  const isSelected = item.id === selectedStudyItemId;
+                  const color =
+                    item.topicId === 'agriculture'
+                      ? '#16803c'
+                      : item.topicId === 'minerals'
+                        ? '#7c3aed'
+                        : item.topicId === 'landmarks'
+                          ? '#c2410c'
+                          : '#0f766e';
+                  return (
+                    <g
+                      key={item.id}
+                      transform={`translate(${item.x}, ${item.y})`}
+                      data-map-feature
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Study ${EDUCATION_TOPICS.find((topic) => topic.id === item.topicId)?.label}: ${item.name}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onSelectStudyItem(item.id);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          onSelectStudyItem(item.id);
+                        }
+                      }}
+                      className="map-study-feature cursor-pointer"
+                    >
+                      <title>{`${item.name} — ${item.status}`}</title>
+                      <circle r="14" fill="transparent" />
+                      <circle
+                        r={isSelected ? 9 : 7}
+                        fill={color}
+                        stroke={isSelected ? '#f97316' : '#ffffff'}
+                        strokeWidth={isSelected ? 3 : 2}
+                      />
+                      <text
+                        x="11"
+                        y="-9"
+                        fontSize="10"
+                        fontWeight="700"
+                        fill="#111827"
+                        stroke="#ffffff"
+                        strokeWidth="3"
+                        paintOrder="stroke"
+                      >
+                        {item.name}
+                      </text>
+                    </g>
+                  );
+                })}
+              </g>
+            )}
 
             {/* 11. Top-Left Cartographic Compass Rose (N / W / E / S) */}
             <g transform="translate(44, 58)" pointerEvents="none">
@@ -804,7 +1024,13 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
       >
         <div className="flex items-center justify-between mb-1.5">
           <h3 className="text-[12.5px] font-bold text-slate-900 truncate">
-            {activeLayer === 'political' ? 'Legend' : `${activeLayerDef.label} Legend`}
+            {mode === 'study'
+              ? studyTopic
+                ? `${EDUCATION_TOPICS.find((topic) => topic.id === studyTopic)?.label} Study Layer`
+                : 'Study Layer'
+              : activeLayer === 'political'
+                ? 'Legend'
+                : `${activeLayerDef.label} Legend`}
           </h3>
           <button
             type="button"
@@ -815,8 +1041,14 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           </button>
         </div>
 
+        {mode === 'study' ? (
+          <div className="mb-1.5 rounded-lg bg-amber-50 border border-amber-200 px-2 py-1.5 text-[10px] leading-snug text-amber-900">
+            Prototype content · locations and examples are approximate.
+          </div>
+        ) : null}
+
         {/* Choropleth Scale when Data Layer is Active */}
-        {activeLayer !== 'political' && (
+        {mode === 'political' && activeLayer !== 'political' && (
           <div className="mb-2 pb-2 border-b border-slate-100 space-y-1">
             <div className="text-[10.5px] font-semibold text-slate-500">
               {activeLayerDef.primaryMetricLabel}
@@ -841,6 +1073,21 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           </div>
         )}
 
+        {mode === 'study' ? (
+          <ul className="space-y-1 text-[11px] text-slate-700 font-medium">
+            {studyTopic === 'rivers' ? (
+              <li className="flex items-center gap-2">
+                <span className="w-6 h-[2px] bg-teal-700 rounded-full" />
+                <span>River path · dashed Mano is approximate</span>
+              </li>
+            ) : (
+              <li className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-700" />
+                <span>Illustrative study location</span>
+              </li>
+            )}
+          </ul>
+        ) : (
         <ul className="space-y-1 text-[11.5px] text-slate-700 font-medium">
           <li className="flex items-center gap-3">
             <span className="w-6 flex items-center justify-center shrink-0">
@@ -917,6 +1164,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             </button>
           </li>
         </ul>
+        )}
       </div>
 
       {/* Bottom-Right Floating Zoom & Recenter Controls */}
