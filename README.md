@@ -25,6 +25,13 @@ A production-grade geospatial web application for exploring the **Republic of Si
   - One-click **Export CSV** and **Export JSON** downloads for the active city and province's regional telemetry.
   - Interactive **WhatsApp Field Reporting** form allowing field coordinators to log status dispatches (**Nominal**, **Maintenance**, **Priority Alert**) directly into application state and generate formatted WhatsApp share payloads (`https://wa.me/?text=...`) with GPS coordinates and live sector scores.
 
+### Education & Civic Literacy Study Mode
+- **Political / Study modes**: Switch between the existing map and a topic-based prototype study guide without changing the existing telemetry layers.
+- **Study topics**: Explore candidate river paths, agriculture, minerals, landmarks, and a small set of illustrative chiefdom examples.
+- **Selectable map features and study notes**: Search and select a topic item from the map or sidebar to view a short explanation, related area, revision prompt, prototype status, and reference link.
+- **Prototype-data labeling**: Study locations and simplified boundaries are explicitly described as illustrative or approximate. The seven-river group includes an approximate candidate Mano River path and is not presented as an official classification.
+- **Not yet offline or syllabus-certified**: PWA offline support and verification against the current WASSCE syllabus remain follow-up work.
+
 ---
 
 ## 2. Core Technologies & Tools Used
@@ -62,14 +69,18 @@ A production-grade geospatial web application for exploring the **Republic of Si
     ├── components/
     │   ├── LeftSidebar.tsx           # Search bar, 5 province rows with live KPI badges, city list, and Africa locator card
     │   ├── InteractiveMap.tsx        # Floating Data Layer Switcher, SVG GeoJSON map stage, on-map KPI pills, and adaptive legend
+    │   ├── EducationDetailPanel.tsx  # Study-mode feature notes, prototype status, revision prompt, and source link
     │   └── RightDetailPanel.tsx      # 5-tab inspector (Overview, Live Metrics, Key Facts, Places, More), CSV/JSON export & WhatsApp dispatch
     ├── data/
     │   ├── metric.js                 # Regional metric source used to initialize the live telemetry store
+    │   ├── educationData.ts          # Typed prototype topics and source-attributed study records
     │   ├── sierraLeoneGeoJson.ts     # GADM 4.1 province/district polygon rings, rivers, borders, and WGS84 projection functions
     │   └── sierraLeoneData.ts        # 5 provinces and 40+ cities with GPS coordinates, demographics, and regional facts
     └── utils/
         ├── mapFilters.ts             # Pure functions for search filtering, zoom clamping, and spatial nearest-city lookup
         ├── mapFilters.test.ts        # Unit test suite for geospatial projection and search filters
+        ├── educationFilters.ts       # Study-topic search and filtering
+        ├── educationFilters.test.ts  # Prototype study data, rivers, metadata, and search tests
         ├── telemetryEngine.ts        # Real-time telemetry store, deterministic tick simulator, choropleth resolver, CSV/JSON/WhatsApp formatters
         └── telemetryEngine.test.ts   # Unit test suite for telemetry simulation, choropleth tiers, and data exports
 ```
