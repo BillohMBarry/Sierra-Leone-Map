@@ -17,7 +17,7 @@
     "start": "vite",
     "dev": "vite",
     "build": "vite build",
-    "test": "node --import tsx --test src/utils/mapFilters.test.ts src/utils/telemetryEngine.test.ts"
+    "test": "node --import tsx --test src/utils/mapFilters.test.ts src/utils/telemetryEngine.test.ts src/utils/educationFilters.test.ts"
   },
   "browserslist": {
     "production": [
