@@ -3,6 +3,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Menu } from 'lucide-react';
 import { CITIES, PROVINCES, RegionId } from './data/sierraLeoneData';
 import {
+  EDUCATION_STUDY_ITEMS,
+  EducationTopicId,
+} from './data/educationData';
+import {
   filterCities,
   filterProvinces,
   getCityById,
@@ -19,6 +23,8 @@ import {
 import { LeftSidebar } from './components/LeftSidebar';
 import { InteractiveMap } from './components/InteractiveMap';
 import { RightDetailPanel } from './components/RightDetailPanel';
+import { EducationDetailPanel } from './components/EducationDetailPanel';
+import { filterEducationItems } from './utils/educationFilters';
 
 const INITIAL_FIELD_REPORTS: FieldReportEntry[] = [
   {
@@ -57,6 +63,9 @@ function App() {
   const [isDetailOpen, setIsDetailOpen] = useState<boolean>(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
   const [favoriteCityIds, setFavoriteCityIds] = useState<string[]>(['freetown']);
+  const [mode, setMode] = useState<'political' | 'study'>('political');
+  const [studyTopic, setStudyTopic] = useState<EducationTopicId | null>('rivers');
+  const [selectedStudyItemId, setSelectedStudyItemId] = useState<string | null>('river-rokel');
   const menuButtonRef = useRef<HTMLButtonElement>(null);
 
   // Real-Time Regional Metrics & Data Layer Switcher state
@@ -85,6 +94,13 @@ function App() {
   );
 
   const siblingCities = useMemo(() => getSiblingCities(selectedCity), [selectedCity]);
+  const filteredStudyItems = useMemo(
+    () =>
+      studyTopic
+        ? filterEducationItems(EDUCATION_STUDY_ITEMS, studyTopic, searchQuery)
+        : [],
+    [studyTopic, searchQuery]
+  );
 
   const closeSidebar = useCallback(() => {
     setIsSidebarOpen(false);
@@ -145,6 +161,46 @@ function App() {
     setShowAllCities(true);
   };
 
+  const handleSelectStudyItem = (itemId: string) => {
+    setSelectedStudyItemId(itemId);
+    setIsDetailOpen(true);
+    closeSidebar();
+  };
+
+  const handleSearchChange = (query: string) => {
+    setSearchQuery(query);
+    if (mode === 'study' && studyTopic) {
+      const matchingItems = filterEducationItems(EDUCATION_STUDY_ITEMS, studyTopic, query);
+      setSelectedStudyItemId(matchingItems[0]?.id ?? null);
+    }
+  };
+
+  const handleSelectStudyTopic = (topicId: EducationTopicId) => {
+    if (studyTopic === topicId) {
+      setStudyTopic(null);
+      setSelectedStudyItemId(null);
+      setIsDetailOpen(true);
+      return;
+    }
+    setStudyTopic(topicId);
+    const matchingItems = filterEducationItems(EDUCATION_STUDY_ITEMS, topicId, searchQuery);
+    setSelectedStudyItemId(matchingItems[0]?.id ?? null);
+    setIsDetailOpen(true);
+  };
+
+  const handleSelectMode = (nextMode: 'political' | 'study') => {
+    setMode(nextMode);
+    setIsDetailOpen(true);
+    if (nextMode === 'study' && !studyTopic) {
+      setStudyTopic('rivers');
+      setSelectedStudyItemId(
+        filterEducationItems(EDUCATION_STUDY_ITEMS, 'rivers', searchQuery)[0]?.id ?? null
+      );
+    } else if (nextMode === 'study' && !selectedStudyItemId) {
+      setSelectedStudyItemId(filteredStudyItems[0]?.id ?? null);
+    }
+  };
+
   const handleToggleFavorite = (cityId: string) => {
     setFavoriteCityIds((prev) =>
       prev.includes(cityId) ? prev.filter((id) => id !== cityId) : [...prev, cityId]
@@ -196,10 +252,15 @@ function App() {
         showAllCities={showAllCities}
         activeLayer={activeLayer}
         telemetryStore={telemetryStore}
-        onSearchChange={setSearchQuery}
+        studyMode={mode === 'study'}
+        studyTopic={studyTopic}
+        studyItems={filteredStudyItems}
+        selectedStudyItemId={selectedStudyItemId}
+        onSearchChange={handleSearchChange}
         onSelectCity={handleSelectCity}
         onSelectProvince={handleSelectProvince}
         onToggleShowAllCities={() => setShowAllCities((prev) => !prev)}
+        onSelectStudyItem={handleSelectStudyItem}
         onClose={closeSidebar}
       />
 
@@ -232,6 +293,10 @@ function App() {
           selectedCity={selectedCity}
           selectedProvinceId={selectedProvinceId}
           isDetailOpen={isDetailOpen}
+          mode={mode}
+          studyTopic={studyTopic}
+          studyItems={filteredStudyItems}
+          selectedStudyItemId={selectedStudyItemId}
           activeLayer={activeLayer}
           telemetryStore={telemetryStore}
           isStreamActive={isStreamActive}
@@ -240,9 +305,20 @@ function App() {
           onPulseTelemetry={handlePulseTelemetry}
           onSelectCity={handleSelectCity}
           onSelectProvince={handleSelectProvince}
+          onSelectMode={handleSelectMode}
+          onSelectStudyTopic={handleSelectStudyTopic}
+          onSelectStudyItem={handleSelectStudyItem}
         />
 
         {isDetailOpen ? (
+          mode === 'study' ? (
+            <EducationDetailPanel
+              item={
+                EDUCATION_STUDY_ITEMS.find((item) => item.id === selectedStudyItemId) ?? null
+              }
+              onClose={() => setIsDetailOpen(false)}
+            />
+          ) : (
           <RightDetailPanel
             city={selectedCity}
             province={selectedCityProvince}
@@ -258,13 +334,14 @@ function App() {
             onExploreRegion={handleExploreRegion}
             onClose={() => setIsDetailOpen(false)}
           />
+          )
         ) : (
           <button
             type="button"
             onClick={() => setIsDetailOpen(true)}
             className="absolute right-5 top-5 z-20 px-4 py-2.5 bg-white/95 backdrop-blur-xs rounded-2xl shadow-md border border-slate-200/80 text-[13px] font-bold text-slate-900 hover:bg-white transition-colors"
           >
-            Show {selectedCity.name} Details
+            {mode === 'study' ? 'Show Study Details' : `Show ${selectedCity.name} Details`}
           </button>
         )}
       </div>
