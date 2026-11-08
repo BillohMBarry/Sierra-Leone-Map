@@ -303,9 +303,9 @@ export const RightDetailPanel: React.FC<RightDetailPanelProps> = ({
   return (
     <aside
       aria-label={`${city.name} Details`}
-      className="absolute right-4 top-5 bottom-5 w-[346px] bg-white rounded-[24px] shadow-xl border border-slate-200/80 flex flex-col z-20 overflow-hidden select-none"
+      className="absolute inset-x-3 bottom-3 max-h-[45vh] w-auto bg-white rounded-[24px] shadow-xl border border-slate-200/80 flex flex-col z-20 overflow-hidden select-none md:inset-x-auto md:right-4 md:top-5 md:bottom-5 md:w-[346px] md:max-h-none"
     >
-      <div className="flex-1 overflow-y-auto px-4 pt-4 pb-5 custom-scrollbar">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-4 pb-5 custom-scrollbar">
         {/* Top Row: Close button */}
         <div className="flex items-start justify-between px-1">
           <div className="pt-0.5">

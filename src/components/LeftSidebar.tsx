@@ -1,6 +1,11 @@
 import React, { useEffect, useRef } from 'react';
 import { Building2, ChevronRight, Compass, Search, X } from 'lucide-react';
 import { CityData, ProvinceData, RegionId } from '../data/sierraLeoneData';
+import {
+  EDUCATION_TOPICS,
+  EducationStudyItem,
+  EducationTopicId,
+} from '../data/educationData';
 import { DataLayerId, resolveChoroplethStyle, TelemetryStore } from '../utils/telemetryEngine';
 
 interface LeftSidebarProps {
@@ -13,10 +18,15 @@ interface LeftSidebarProps {
   showAllCities: boolean;
   activeLayer: DataLayerId;
   telemetryStore: TelemetryStore;
+  studyMode: boolean;
+  studyTopic: EducationTopicId | null;
+  studyItems: EducationStudyItem[];
+  selectedStudyItemId: string | null;
   onSearchChange: (q: string) => void;
   onSelectCity: (cityId: string) => void;
   onSelectProvince: (provinceId: RegionId) => void;
   onToggleShowAllCities: () => void;
+  onSelectStudyItem: (itemId: string) => void;
   onClose: () => void;
 }
 
@@ -30,10 +40,15 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   showAllCities,
   activeLayer,
   telemetryStore,
+  studyMode,
+  studyTopic,
+  studyItems,
+  selectedStudyItemId,
   onSearchChange,
   onSelectCity,
   onSelectProvince,
   onToggleShowAllCities,
+  onSelectStudyItem,
   onClose,
 }) => {
   const sidebarRef = useRef<HTMLElement>(null);
@@ -114,7 +129,9 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
         {/* Search Input */}
         <div className="relative mt-1 mb-2">
           <label htmlFor="map-search-input" className="sr-only">
-            Search for a city, district or region
+            {studyMode
+              ? 'Search study topics and examples'
+              : 'Search for a city, district or region'}
           </label>
           <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
@@ -122,7 +139,11 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
             type="text"
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search for a city, district or region..."
+            placeholder={
+              studyMode
+                ? 'Search this study topic...'
+                : 'Search for a city, district or region...'
+            }
             className="w-full pl-9 pr-8 py-2 text-[13px] text-slate-800 placeholder:text-slate-400 bg-white border border-slate-200/90 rounded-full shadow-2xs focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-500/15 transition-all"
           />
           {searchQuery && (
@@ -138,6 +159,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
         </div>
 
         {/* 5 Regions / Provinces List */}
+        {!studyMode && (
         <nav aria-label="Provinces of Sierra Leone" className="divide-y divide-slate-100">
           {provinces.map((prov) => {
             const isSelected = selectedProvinceId === prov.id;
@@ -186,7 +208,60 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
             );
           })}
         </nav>
+        )}
 
+        {studyMode ? (
+        <section className="mt-2.5 pt-2.5 border-t border-slate-200/70" aria-label="Study materials">
+          <div className="flex items-center justify-between px-2 mb-1.5">
+            <h2 className="text-[13.5px] font-bold text-slate-900">
+              {EDUCATION_TOPICS.find((topic) => topic.id === studyTopic)?.label ?? 'Study topics hidden'} ({studyItems.length})
+            </h2>
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-900">
+              Prototype
+            </span>
+          </div>
+          <div className="max-h-[55vh] space-y-0.5 overflow-y-auto pr-1 custom-scrollbar">
+            {studyItems.length === 0 ? (
+              <p className="px-2.5 py-3 text-xs text-slate-500">
+                {studyTopic
+                  ? 'No matching study items in this topic.'
+                  : 'Select a topic above to show study items.'}
+              </p>
+            ) : (
+              studyItems.map((item) => {
+                const isActive = item.id === selectedStudyItemId;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => onSelectStudyItem(item.id)}
+                    aria-pressed={isActive}
+                    className={`w-full rounded-xl px-2.5 py-2 text-left transition-colors ${
+                      isActive
+                        ? 'bg-emerald-50 text-slate-900 font-semibold'
+                        : 'text-slate-700 font-medium hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2.5 min-w-0">
+                      <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${isActive ? 'bg-orange-500' : 'bg-emerald-700'}`} />
+                      <span className="min-w-0">
+                        <span className="block truncate text-[13px]">{item.name}</span>
+                        <span className="block truncate text-[10px] font-normal text-slate-500">
+                          {[item.district, item.regionId?.replace('-', ' ')].filter(Boolean).join(' · ') || item.status}
+                        </span>
+                      </span>
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+          <p className="mt-2 px-2 text-[10px] leading-snug text-slate-500">
+            Demonstration content; locations and examples may be approximate.
+          </p>
+        </section>
+        ) : (
+        <>
         {/* Major Cities Section */}
         <div className="mt-2.5 pt-2.5 border-t border-slate-200/70">
           <div className="flex items-center justify-between px-2 mb-1.5">
@@ -274,6 +349,8 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
             />
           </button>
         </div>
+        </>
+        )}
       </div>
 
       {/* Bottom Africa Locator Inset Map Card */}
