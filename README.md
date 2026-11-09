@@ -11,6 +11,7 @@ A production-grade geospatial web application for exploring the **Republic of Si
 - **Bidirectional WGS84 Equirectangular Projection (`projectLngLat` / `unprojectPoint`)**: Real-time forward projection of WGS84 GPS coordinates (`°N, °W`) to SVG canvas space (`850 × 1024`) and inverse coordinate readout under the user's cursor.
 - **40+ Georeferenced Cities & Towns**: Authentic GPS coordinates, population estimates, district capitals, elevations, landmarks, and socio-economic profiles.
 - **Interactive Viewport Controls**: Smooth pan, zoom (`1x` – `3.2x`), one-click view reset, district boundary toggle, interactive symbol highlighting from the legend, and nearest-city spatial hit-testing (`findNearestCityAtPoint`).
+- **Administrative drill-down**: Select a province to zoom to its districts, then select a district to view and select its ADM3 local areas. The ADM3 boundaries load on demand from the HDX *Sierra Leone Subnational Administrative Boundaries (COD-AB)* dataset; the existing app province and district boundaries remain in use. The interface uses “local areas” rather than assuming every ADM3 unit is a chiefdom, and the drill-down stops at ADM3.
 
 ### Real-Time Regional Metrics & Data Layer Switcher
 - **5-Layer Sector Switcher**:
@@ -75,6 +76,9 @@ A production-grade geospatial web application for exploring the **Republic of Si
     │   ├── metric.js                 # Regional metric source used to initialize the live telemetry store
     │   ├── educationData.ts          # Typed prototype topics and source-attributed study records
     │   ├── sierraLeoneGeoJson.ts     # GADM 4.1 province/district polygon rings, rivers, borders, and WGS84 projection functions
+    │   ├── localAreas.ts             # Lazy HDX ADM3 local-area loading and validation
+    │   └── sle_admin_boundaries.geojson/
+    │       └── sle_admin3.geojson    # HDX COD-AB ADM3 local-area boundaries
     │   └── sierraLeoneData.ts        # 5 provinces and 40+ cities with GPS coordinates, demographics, and regional facts
     └── utils/
         ├── mapFilters.ts             # Pure functions for search filtering, zoom clamping, and spatial nearest-city lookup
@@ -142,10 +146,10 @@ npm run preview
 
 ## 6. Running Unit Tests
 
-Pure business logic, WGS84 GeoJSON coordinate projection round-trips, polygon containment, telemetry tick simulation, CSV/JSON serialization, and WhatsApp report formatting are decoupled in `src/utils/` and tested using Node's built-in test runner via `tsx`:
+Pure business logic, WGS84 GeoJSON coordinate projection round-trips, polygon containment, administrative hierarchy parsing, telemetry tick simulation, CSV/JSON serialization, and WhatsApp report formatting are decoupled in `src/utils/` and tested using Node's built-in test runner via `tsx`:
 
 ```bash
-npx --yes tsx --test src/utils/mapFilters.test.ts src/utils/telemetryEngine.test.ts
+npm test
 ```
 
 ### Test Coverage Highlights
