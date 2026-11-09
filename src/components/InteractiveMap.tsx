@@ -1,6 +1,7 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
+  ChevronRight,
   Compass as CompassIcon,
   BookOpen,
   Gem,
@@ -18,6 +19,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { CityData, ProvinceData, RegionId } from '../data/sierraLeoneData';
+import { LocalAreaFeature, normalizeAdministrativeName } from '../data/localAreas';
 import {
   EDUCATION_TOPICS,
   EducationStudyItem,
@@ -32,6 +34,7 @@ import {
   projectLngLat,
   unprojectPoint,
   WEST_AFRICA_LAND_RING,
+  LngLat,
 } from '../data/sierraLeoneGeoJson';
 import { clampZoom, findNearestCityAtPoint } from '../utils/mapFilters';
 import {
@@ -47,21 +50,31 @@ interface InteractiveMapProps {
   cities: CityData[];
   selectedCity: CityData;
   selectedProvinceId: RegionId | null;
+  selectedDistrictName: string | null;
+  selectedLocalAreaId: string | null;
+  localAreas: LocalAreaFeature[];
+  localAreasStatus: 'idle' | 'loading' | 'loaded' | 'error';
+  localAreasError: string | null;
+  onRetryLocalAreas: () => void;
   activeLayer: DataLayerId;
   telemetryStore: TelemetryStore;
   isStreamActive: boolean;
   isDetailOpen: boolean;
   mode: 'political' | 'study';
   studyTopic: EducationTopicId | null;
+  freetownLandmarksOnly: boolean;
   studyItems: EducationStudyItem[];
   selectedStudyItemId: string | null;
   onSelectCity: (cityId: string) => void;
-  onSelectProvince: (provinceId: RegionId) => void;
+  onSelectProvince: (provinceId: RegionId | null) => void;
+  onSelectDistrict: (districtName: string | null) => void;
+  onSelectLocalArea: (localAreaId: string) => void;
   onSelectLayer: (layerId: DataLayerId) => void;
   onToggleStream: () => void;
   onPulseTelemetry: () => void;
   onSelectMode: (mode: 'political' | 'study') => void;
   onSelectStudyTopic: (topicId: EducationTopicId) => void;
+  onToggleFreetownLandmarksOnly: () => void;
   onSelectStudyItem: (itemId: string) => void;
 }
 
@@ -81,26 +94,51 @@ const PROVINCE_LABEL_POSITIONS: Record<RegionId, { x: number; y: number; fontSiz
   eastern: { x: 646, y: 572, fontSize: 14 },
 };
 
+function getRingsCenter(rings: LngLat[][]): [number, number] {
+  const points = rings.flatMap((ring) => ring.map(([lng, lat]) => projectLngLat(lng, lat)));
+  if (points.length === 0) return [0, 0];
+  const bounds = points.reduce(
+    (result, [x, y]) => ({
+      minX: Math.min(result.minX, x),
+      minY: Math.min(result.minY, y),
+      maxX: Math.max(result.maxX, x),
+      maxY: Math.max(result.maxY, y),
+    }),
+    { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
+  );
+  return [(bounds.minX + bounds.maxX) / 2, (bounds.minY + bounds.maxY) / 2];
+}
+
 export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   provinces,
   cities,
   selectedCity,
   selectedProvinceId,
+  selectedDistrictName,
+  selectedLocalAreaId,
+  localAreas,
+  localAreasStatus,
+  localAreasError,
+  onRetryLocalAreas,
   activeLayer,
   telemetryStore,
   isStreamActive,
   isDetailOpen,
   mode,
   studyTopic,
+  freetownLandmarksOnly,
   studyItems,
   selectedStudyItemId,
   onSelectCity,
   onSelectProvince,
+  onSelectDistrict,
+  onSelectLocalArea,
   onSelectLayer,
   onToggleStream,
   onPulseTelemetry,
   onSelectMode,
   onSelectStudyTopic,
+  onToggleFreetownLandmarksOnly,
   onSelectStudyItem,
 }) => {
   const [zoom, setZoom] = useState<number>(1);
@@ -116,7 +154,12 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   >(null);
 
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
   const didMoveRef = useRef<boolean>(false);
+  const currentZoomRef = useRef(zoom);
+  const currentPanRef = useRef(pan);
+  currentZoomRef.current = zoom;
+  currentPanRef.current = pan;
 
   const activeLayerDef = useMemo(() => getLayerDefinition(activeLayer), [activeLayer]);
   const visibleLayer = mode === 'study' ? 'political' : activeLayer;
@@ -131,10 +174,69 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
       Object.entries(DISTRICT_GEOJSON).map(([name, data]) => ({
         name,
         provinceId: data.provinceId,
+        rings: data.rings,
         d: ringsToSvgPath(data.rings),
+        center: getRingsCenter(data.rings),
       })),
     []
   );
+  const freetownDistrict = useMemo(
+    () =>
+      districtPaths.find(
+        (district) =>
+          normalizeAdministrativeName(district.name) ===
+          normalizeAdministrativeName('Western Area Urban')
+      ),
+    [districtPaths]
+  );
+  const localAreaPaths = useMemo(
+    () =>
+      localAreas
+        .filter(
+          (area) =>
+            area.provinceId === selectedProvinceId &&
+            selectedDistrictName !== null &&
+            normalizeAdministrativeName(area.districtName) ===
+              normalizeAdministrativeName(selectedDistrictName)
+        )
+        .map((area) => {
+          const [x, y] = projectLngLat(area.center[0], area.center[1]);
+          return { ...area, d: ringsToSvgPath(area.rings), x, y };
+        }),
+    [localAreas, selectedDistrictName, selectedProvinceId]
+  );
+  const localAreaLabelIds = useMemo(() => {
+    if (zoom < 1.6) return new Set<string>();
+
+    const placedLabels: Array<{ left: number; right: number; top: number; bottom: number }> = [];
+    const visibleLabels = new Set<string>();
+    const orderedAreas = [...localAreaPaths].sort(
+      (a, b) => Number(b.id === selectedLocalAreaId) - Number(a.id === selectedLocalAreaId)
+    );
+
+    for (const area of orderedAreas) {
+      const halfWidth = area.name.length * 1.8;
+      const labelBounds = {
+        left: area.x - halfWidth,
+        right: area.x + halfWidth,
+        top: area.y - 5,
+        bottom: area.y + 2,
+      };
+      const overlaps = placedLabels.some(
+        (placed) =>
+          labelBounds.left < placed.right &&
+          labelBounds.right > placed.left &&
+          labelBounds.top < placed.bottom &&
+          labelBounds.bottom > placed.top
+      );
+      if (overlaps && area.id !== selectedLocalAreaId) continue;
+
+      visibleLabels.add(area.id);
+      placedLabels.push(labelBounds);
+    }
+
+    return visibleLabels;
+  }, [localAreaPaths, selectedLocalAreaId, zoom]);
   const riverPaths = useMemo(
     () =>
       MAJOR_RIVERS_GEOJSON.map((river) => ({
@@ -164,22 +266,120 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     [studyItems]
   );
 
+  const zoomToRings = (rings: LngLat[][], maxZoom = 2.5) => {
+    const svg = svgRef.current;
+    const viewport = viewportRef.current;
+    if (!svg || !viewport || rings.length === 0) return;
+
+    const points = rings.flatMap((ring) => ring.map(([lng, lat]) => projectLngLat(lng, lat)));
+    if (points.length === 0) return;
+    const bounds = points.reduce(
+      (result, [x, y]) => ({
+        minX: Math.min(result.minX, x),
+        minY: Math.min(result.minY, y),
+        maxX: Math.max(result.maxX, x),
+        maxY: Math.max(result.maxY, y),
+      }),
+      { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
+    );
+    const boundsWidth = Math.max(bounds.maxX - bounds.minX, 1);
+    const boundsHeight = Math.max(bounds.maxY - bounds.minY, 1);
+    const viewportRect = viewport.getBoundingClientRect();
+    const svgRect = svg.getBoundingClientRect();
+    const currentZoom = currentZoomRef.current;
+    const currentPan = currentPanRef.current;
+    const baseScale = svgRect.width / (850 * currentZoom);
+    const nextZoom = clampZoom(
+      Math.min(
+        (viewportRect.width - 80) / (boundsWidth * baseScale),
+        (viewportRect.height - 100) / (boundsHeight * baseScale)
+      ),
+      0.85,
+      maxZoom
+    );
+
+    const point = svg.createSVGPoint();
+    point.x = (bounds.minX + bounds.maxX) / 2;
+    point.y = (bounds.minY + bounds.maxY) / 2;
+    const matrix = svg.getScreenCTM();
+    if (!matrix) return;
+    const screenCenter = point.matrixTransform(matrix);
+    const viewportCenterX = viewportRect.left + viewportRect.width / 2;
+    const viewportCenterY = viewportRect.top + viewportRect.height / 2;
+    setPan({
+      x: -((screenCenter.x - currentPan.x - viewportCenterX) / currentZoom) * nextZoom,
+      y: -((screenCenter.y - currentPan.y - viewportCenterY) / currentZoom) * nextZoom,
+    });
+    setZoom(nextZoom);
+  };
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      if (freetownLandmarksOnly && freetownDistrict) {
+        zoomToRings(freetownDistrict.rings, 16);
+        return;
+      }
+
+      if (selectedLocalAreaId) {
+        const area = localAreas.find((item) => item.id === selectedLocalAreaId);
+        if (area) {
+          zoomToRings(area.rings);
+          return;
+        }
+      }
+
+      if (selectedDistrictName && selectedProvinceId) {
+        const district = districtPaths.find(
+          (item) =>
+            item.provinceId === selectedProvinceId &&
+            normalizeAdministrativeName(item.name) ===
+              normalizeAdministrativeName(selectedDistrictName)
+        );
+        if (district) {
+          zoomToRings(district.rings);
+          return;
+        }
+      }
+
+      if (selectedProvinceId) {
+        const provinceDistricts = districtPaths.filter((item) => item.provinceId === selectedProvinceId);
+        zoomToRings(provinceDistricts.flatMap((item) => item.rings));
+      } else {
+        setZoom(1);
+        setPan({ x: 0, y: 0 });
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    freetownDistrict,
+    freetownLandmarksOnly,
+    selectedDistrictName,
+    selectedLocalAreaId,
+    selectedProvinceId,
+    localAreas,
+  ]);
+
   const handleZoomIn = () => {
-    setZoom((z) => clampZoom(z + 0.25));
+    setZoom((z) => clampZoom(z + 0.25, 0.85, freetownLandmarksOnly ? 16 : 2.5));
   };
 
   const handleZoomOut = () => {
     setZoom((z) => {
-      const next = clampZoom(z - 0.25);
+      const next = clampZoom(z - 0.25, 0.85, freetownLandmarksOnly ? 16 : 2.5);
       if (next <= 1) setPan({ x: 0, y: 0 });
       return next;
     });
   };
 
   const handleResetView = () => {
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
     setLegendHighlight(null);
+    if (freetownLandmarksOnly && freetownDistrict) {
+      zoomToRings(freetownDistrict.rings, 16);
+    } else {
+      setZoom(1);
+      setPan({ x: 0, y: 0 });
+      onSelectProvince(null);
+    }
   };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -240,6 +440,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
 
   return (
     <div
+      ref={viewportRef}
       className="relative flex-1 h-full overflow-hidden bg-[#f3f3e8] select-none"
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
@@ -252,6 +453,53 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
         cursor: isDragging ? 'grabbing' : 'grab',
       }}
     >
+      {selectedProvinceId && mode === 'political' && (
+        <div className="absolute left-1/2 top-[68px] z-20 flex max-w-[calc(100%-24px)] -translate-x-1/2 items-center gap-1 overflow-x-auto whitespace-nowrap rounded-xl border border-slate-200/85 bg-white/95 px-3 py-2 text-[11px] font-semibold text-slate-700 shadow-md backdrop-blur-xs">
+          <button
+            type="button"
+            onClick={() => onSelectProvince(null)}
+            data-map-feature
+            className="hover:text-emerald-800"
+          >
+            Sierra Leone
+          </button>
+          <ChevronRight className="h-3 w-3 text-slate-400" aria-hidden="true" />
+          {selectedDistrictName ? (
+            <>
+              <button
+                type="button"
+                onClick={() => onSelectDistrict(null)}
+                data-map-feature
+                className="hover:text-emerald-800"
+              >
+                {provinces.find((province) => province.id === selectedProvinceId)?.shortName}
+              </button>
+              <ChevronRight className="h-3 w-3 text-slate-400" aria-hidden="true" />
+              <span className="text-slate-950">{selectedDistrictName}</span>
+              {selectedLocalAreaId && (
+                <>
+                  <ChevronRight className="h-3 w-3 text-slate-400" aria-hidden="true" />
+                  <span className="max-w-36 truncate text-emerald-800">
+                    {localAreaPaths.find((area) => area.id === selectedLocalAreaId)?.name}
+                  </span>
+                </>
+              )}
+            </>
+          ) : (
+            <span className="text-slate-950">
+              {provinces.find((province) => province.id === selectedProvinceId)?.shortName}
+            </span>
+          )}
+        </div>
+      )}
+      {selectedDistrictName && mode === 'political' && localAreasStatus === 'error' && (
+        <div role="alert" className="absolute left-1/2 top-[108px] z-20 flex -translate-x-1/2 items-center gap-3 rounded-xl border border-rose-200 bg-white/95 px-3 py-2 text-xs text-rose-800 shadow-md">
+          <span>{localAreasError ?? 'Unable to load local-area boundaries.'}</span>
+          <button type="button" onClick={onRetryLocalAreas} data-map-feature className="font-bold underline">
+            Retry
+          </button>
+        </div>
+      )}
       {/* Floating Data Layer Switcher & Live Telemetry Stream Bar */}
       <div
         role="toolbar"
@@ -316,6 +564,22 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                 </button>
               );
             })}
+            {studyTopic === 'landmarks' && (
+              <button
+                type="button"
+                onClick={onToggleFreetownLandmarksOnly}
+                aria-pressed={freetownLandmarksOnly}
+                aria-label="Show Freetown landmarks only"
+                className={`flex items-center gap-1 px-2 py-1 rounded-xl text-[11px] font-semibold whitespace-nowrap transition-all ${
+                  freetownLandmarksOnly
+                    ? 'bg-orange-700 text-white'
+                    : 'text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                <Landmark className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>Freetown only</span>
+              </button>
+            )}
           </div>
         ) : (
           <>
@@ -380,7 +644,9 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
 
       {/* Interactive Zoomable & Pannable Projected GeoJSON Map Stage */}
       <div
-        className="w-full h-full flex items-center justify-start transition-transform duration-150 ease-out"
+        className={`w-full h-full flex items-center justify-start ${
+          isDragging ? 'transition-none' : 'transition-transform duration-500 ease-out'
+        }`}
         style={{
           transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})`,
           transformOrigin: 'center center',
@@ -397,7 +663,9 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             onClick={handleSvgClick}
             className="w-full h-full block overflow-visible"
             aria-label={
-              mode === 'study'
+              freetownLandmarksOnly
+                ? 'Interactive Freetown historical landmarks map'
+                : mode === 'study'
                 ? 'Interactive Study Map of Sierra Leone'
                 : 'Interactive Projected GeoJSON Political Map of Sierra Leone'
             }
@@ -529,6 +797,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                   <path
                     key={prov.id}
                     d={prov.svgPath}
+                    pointerEvents={selectedProvinceId ? 'none' : undefined}
                     fill={isRiverRegion ? '#fbbf24' : choropleth.fillColor}
                     fillOpacity={isDimmed ? 0.55 : isRiverRegion ? 0.82 : 1}
                     stroke={isRiverRegion ? '#c2410c' : '#ffffff'}
@@ -538,20 +807,6 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                     onMouseLeave={() => setHoveredProvinceId(null)}
                     onClick={(e) => {
                       e.stopPropagation();
-                      const pt = svgRef.current?.createSVGPoint();
-                      if (pt && svgRef.current) {
-                        pt.x = e.clientX;
-                        pt.y = e.clientY;
-                        const ctm = svgRef.current.getScreenCTM();
-                        if (ctm) {
-                          const t = pt.matrixTransform(ctm.inverse());
-                          const nearCity = findNearestCityAtPoint(t.x, t.y, 20);
-                          if (nearCity) {
-                            onSelectCity(nearCity.id);
-                            return;
-                          }
-                        }
-                      }
                       onSelectProvince(prov.id);
                     }}
                     className="cursor-pointer transition-colors duration-200"
@@ -569,7 +824,61 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             </g>
 
             {/* 4. Official 16 Districts Boundary Layer */}
-            {showDistrictBorders && (
+            {selectedProvinceId ? (
+              <g>
+                {districtPaths
+                  .filter((district) => district.provinceId === selectedProvinceId)
+                  .map((district) => {
+                    const isSelected =
+                      normalizeAdministrativeName(district.name) ===
+                      normalizeAdministrativeName(selectedDistrictName ?? '');
+                    return (
+                      <g key={district.name}>
+                        <path
+                          d={district.d}
+                          fill={isSelected ? '#0f766e' : '#ffffff'}
+                          fillOpacity={isSelected ? 0.3 : 0.12}
+                          stroke={isSelected ? '#0f766e' : '#334155'}
+                          strokeWidth={isSelected ? 2 : 1.5}
+                          strokeLinejoin="round"
+                          role="button"
+                          tabIndex={0}
+                          aria-pressed={isSelected}
+                          aria-label={`Open ${district.name} district`}
+                          data-map-feature
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onSelectDistrict(district.name);
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              onSelectDistrict(district.name);
+                            }
+                          }}
+                          className="map-admin-feature cursor-pointer"
+                        >
+                          <title>{`Open ${district.name} district`}</title>
+                        </path>
+                        <text
+                          x={district.center[0]}
+                          y={district.center[1]}
+                          textAnchor="middle"
+                          fontSize="10"
+                          fontWeight="700"
+                          fill="#172554"
+                          stroke="white"
+                          strokeWidth="3"
+                          paintOrder="stroke"
+                          pointerEvents="none"
+                        >
+                          {district.name}
+                        </text>
+                      </g>
+                    );
+                  })}
+              </g>
+            ) : showDistrictBorders ? (
               <g pointerEvents="none">
                 {districtPaths.map((dist) => (
                   <path
@@ -583,7 +892,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                   />
                 ))}
               </g>
-            )}
+            ) : null}
 
             {/* 5. Major Rivers of Sierra Leone (Projected WGS84) */}
             {mode === 'political' && (
@@ -620,8 +929,9 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             />
 
             {/* 8. Province Cartographic Titles & On-Map KPI Badges */}
-            <g pointerEvents="none" fontFamily="Plus Jakarta Sans, sans-serif">
-              {provinces.map((prov) => {
+            {!selectedProvinceId && !freetownLandmarksOnly && (
+              <g pointerEvents="none" fontFamily="Plus Jakarta Sans, sans-serif">
+                {provinces.map((prov) => {
                 const pos = PROVINCE_LABEL_POSITIONS[prov.id];
                 const words =
                   prov.id === 'western'
@@ -694,12 +1004,68 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                     )}
                   </g>
                 );
-              })}
-            </g>
+                })}
+              </g>
+            )}
+
+            {selectedDistrictName && mode === 'political' && (
+              <g>
+                {localAreaPaths.map((area) => {
+                  const isSelected = area.id === selectedLocalAreaId;
+                  return (
+                    <g key={area.id}>
+                      <path
+                        d={area.d}
+                        fill={isSelected ? '#0f766e' : '#f8fafc'}
+                        fillOpacity={isSelected ? 0.48 : 0.16}
+                        stroke={isSelected ? '#115e59' : '#334155'}
+                        strokeWidth={isSelected ? 2 : 1}
+                        strokeLinejoin="round"
+                        role="button"
+                        tabIndex={0}
+                        aria-pressed={isSelected}
+                        aria-label={`Select local area ${area.name}`}
+                        data-map-feature
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onSelectLocalArea(area.id);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            onSelectLocalArea(area.id);
+                          }
+                        }}
+                        className="map-admin-feature cursor-pointer"
+                      >
+                        <title>{`${area.name} local area — ${area.districtName} District, ${area.provinceName}`}</title>
+                      </path>
+                      {localAreaLabelIds.has(area.id) && (
+                        <text
+                          x={area.x}
+                          y={area.y}
+                          textAnchor="middle"
+                          fontSize="6.5"
+                          fontWeight="600"
+                          fill="#0f172a"
+                          stroke="white"
+                          strokeWidth="2.5"
+                          paintOrder="stroke"
+                          pointerEvents="none"
+                        >
+                          {area.name}
+                        </text>
+                      )}
+                    </g>
+                  );
+                })}
+              </g>
+            )}
 
             {/* 9. Real Projected GPS City Markers & Labels */}
-            <g>
-              {cities.map((city) => {
+            {!selectedProvinceId && !freetownLandmarksOnly && (
+              <g>
+                {cities.map((city) => {
                 const isSelected = city.id === selectedCity.id;
                 const isHovered = city.id === hoveredCityId;
                 const isCountryCapital = city.status === 'Country Capital';
@@ -799,11 +1165,14 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                     )}
                   </g>
                 );
-              })}
-            </g>
+                })}
+              </g>
+            )}
 
             {/* 10. Floating Active City Callout Pill at Projected GPS Coordinates */}
-            {(() => {
+            {!selectedProvinceId &&
+              !freetownLandmarksOnly &&
+              (() => {
               const activeMetric =
                 visibleLayer !== 'political'
                   ? telemetryStore[selectedCity.regionId][visibleLayer]
@@ -856,7 +1225,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                   </text>
                 </g>
               );
-            })()}
+              })()}
 
             {mode === 'study' && studyTopic === 'rivers' && (
               <g fill="none">
@@ -931,25 +1300,44 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                       className="map-study-feature cursor-pointer"
                     >
                       <title>{`${item.name} — ${item.status}`}</title>
-                      <circle r="14" fill="transparent" />
                       <circle
-                        r={isSelected ? 9 : 7}
+                        r={14 * (freetownLandmarksOnly ? 1 / zoom : 1)}
+                        fill="transparent"
+                      />
+                      <circle
+                        r={(isSelected ? 9 : 7) * (freetownLandmarksOnly ? 1 / zoom : 1)}
                         fill={color}
                         stroke={isSelected ? '#f97316' : '#ffffff'}
-                        strokeWidth={isSelected ? 3 : 2}
+                        strokeWidth={(isSelected ? 3 : 2) * (freetownLandmarksOnly ? 1 / zoom : 1)}
                       />
-                      <text
-                        x="11"
-                        y="-9"
-                        fontSize="10"
-                        fontWeight="700"
-                        fill="#111827"
-                        stroke="#ffffff"
-                        strokeWidth="3"
-                        paintOrder="stroke"
-                      >
-                        {item.name}
-                      </text>
+                      {freetownLandmarksOnly ? (
+                        <text
+                          x="0"
+                          y={3 * (1 / zoom)}
+                          textAnchor="middle"
+                          fontSize={9 / zoom}
+                          fontWeight="700"
+                          fill="#ffffff"
+                          pointerEvents="none"
+                        >
+                          {studyPointItems
+                            .filter((studyItem) => studyItem.topicId === 'landmarks')
+                            .findIndex((studyItem) => studyItem.id === item.id) + 1}
+                        </text>
+                      ) : (
+                        <text
+                          x="11"
+                          y="-9"
+                          fontSize="10"
+                          fontWeight="700"
+                          fill="#111827"
+                          stroke="#ffffff"
+                          strokeWidth="3"
+                          paintOrder="stroke"
+                        >
+                          {item.name}
+                        </text>
+                      )}
                     </g>
                   );
                 })}
@@ -1043,7 +1431,9 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
 
         {mode === 'study' ? (
           <div className="mb-1.5 rounded-lg bg-amber-50 border border-amber-200 px-2 py-1.5 text-[10px] leading-snug text-amber-900">
-            Prototype content · locations and examples are approximate.
+            {freetownLandmarksOnly
+              ? 'Freetown historic-site examples · prototype, not a complete inventory.'
+              : 'Prototype content · locations and examples are approximate.'}
           </div>
         ) : null}
 
@@ -1083,7 +1473,11 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             ) : (
               <li className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-700" />
-                <span>Illustrative study location</span>
+                <span>
+                  {freetownLandmarksOnly
+                    ? 'Numbered landmarks · select for details'
+                    : 'Illustrative study location'}
+                </span>
               </li>
             )}
           </ul>
