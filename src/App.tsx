@@ -3,6 +3,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Menu } from 'lucide-react';
 import { CITIES, PROVINCES, RegionId } from './data/sierraLeoneData';
 import {
+  loadLocalAreas,
+  LocalAreaFeature,
+  normalizeAdministrativeName,
+} from './data/localAreas';
+import {
   EDUCATION_STUDY_ITEMS,
   EducationTopicId,
 } from './data/educationData';
@@ -24,7 +29,7 @@ import { LeftSidebar } from './components/LeftSidebar';
 import { InteractiveMap } from './components/InteractiveMap';
 import { RightDetailPanel } from './components/RightDetailPanel';
 import { EducationDetailPanel } from './components/EducationDetailPanel';
-import { filterEducationItems } from './utils/educationFilters';
+import { filterEducationItems, filterFreetownLandmarks } from './utils/educationFilters';
 
 const INITIAL_FIELD_REPORTS: FieldReportEntry[] = [
   {
@@ -58,6 +63,14 @@ const INITIAL_FIELD_REPORTS: FieldReportEntry[] = [
 function App() {
   const [selectedCityId, setSelectedCityId] = useState<string>('freetown');
   const [selectedProvinceId, setSelectedProvinceId] = useState<RegionId | null>(null);
+  const [selectedDistrictName, setSelectedDistrictName] = useState<string | null>(null);
+  const [selectedLocalAreaId, setSelectedLocalAreaId] = useState<string | null>(null);
+  const [localAreas, setLocalAreas] = useState<LocalAreaFeature[]>([]);
+  const [localAreasStatus, setLocalAreasStatus] = useState<'idle' | 'loading' | 'loaded' | 'error'>(
+    'idle'
+  );
+  const [localAreasError, setLocalAreasError] = useState<string | null>(null);
+  const [localAreasRetry, setLocalAreasRetry] = useState<number>(0);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showAllCities, setShowAllCities] = useState<boolean>(false);
   const [isDetailOpen, setIsDetailOpen] = useState<boolean>(true);
@@ -65,6 +78,7 @@ function App() {
   const [favoriteCityIds, setFavoriteCityIds] = useState<string[]>(['freetown']);
   const [mode, setMode] = useState<'political' | 'study'>('political');
   const [studyTopic, setStudyTopic] = useState<EducationTopicId | null>('rivers');
+  const [freetownLandmarksOnly, setFreetownLandmarksOnly] = useState<boolean>(false);
   const [selectedStudyItemId, setSelectedStudyItemId] = useState<string | null>('river-rokel');
   const menuButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -92,15 +106,28 @@ function App() {
     () => filterCities(CITIES, searchQuery, selectedProvinceId, showAllCities),
     [searchQuery, selectedProvinceId, showAllCities]
   );
+  const selectedDistrictLocalAreas = useMemo(
+    () =>
+      localAreas.filter(
+        (area) =>
+          area.provinceId === selectedProvinceId &&
+          selectedDistrictName !== null &&
+          normalizeAdministrativeName(area.districtName) ===
+            normalizeAdministrativeName(selectedDistrictName) &&
+          (!searchQuery.trim() ||
+            area.name.toLowerCase().includes(searchQuery.trim().toLowerCase()))
+      ),
+    [localAreas, searchQuery, selectedDistrictName, selectedProvinceId]
+  );
 
   const siblingCities = useMemo(() => getSiblingCities(selectedCity), [selectedCity]);
-  const filteredStudyItems = useMemo(
-    () =>
-      studyTopic
-        ? filterEducationItems(EDUCATION_STUDY_ITEMS, studyTopic, searchQuery)
-        : [],
-    [studyTopic, searchQuery]
-  );
+  const filteredStudyItems = useMemo(() => {
+    if (!studyTopic) return [];
+    const topicItems = freetownLandmarksOnly
+      ? filterFreetownLandmarks(EDUCATION_STUDY_ITEMS)
+      : EDUCATION_STUDY_ITEMS;
+    return filterEducationItems(topicItems, studyTopic, searchQuery);
+  }, [freetownLandmarksOnly, studyTopic, searchQuery]);
 
   const closeSidebar = useCallback(() => {
     setIsSidebarOpen(false);
@@ -136,17 +163,52 @@ function App() {
     return () => window.clearInterval(interval);
   }, [isStreamActive, handlePulseTelemetry]);
 
+  useEffect(() => {
+    if (!selectedDistrictName || localAreasStatus === 'loaded') return;
+
+    let isCurrent = true;
+    setLocalAreasStatus('loading');
+    setLocalAreasError(null);
+    loadLocalAreas()
+      .then((areas) => {
+        if (!isCurrent) return;
+        setLocalAreas(areas);
+        setLocalAreasStatus('loaded');
+      })
+      .catch((error: unknown) => {
+        if (!isCurrent) return;
+        setLocalAreasStatus('error');
+        setLocalAreasError(
+          error instanceof Error ? error.message : 'Unable to load local-area boundaries.'
+        );
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [localAreasRetry, selectedDistrictName]);
+
   const handleSelectCity = (cityId: string) => {
     setSelectedCityId(cityId);
     setIsDetailOpen(true);
     closeSidebar();
   };
 
-  const handleSelectProvince = (provinceId: RegionId) => {
-    if (selectedProvinceId === provinceId) {
+  const handleSelectProvince = (provinceId: RegionId | null) => {
+    if (provinceId === null || selectedProvinceId === provinceId) {
+      if (provinceId !== null && selectedDistrictName) {
+        setSelectedDistrictName(null);
+        setSelectedLocalAreaId(null);
+        closeSidebar();
+        return;
+      }
       setSelectedProvinceId(null);
+      setSelectedDistrictName(null);
+      setSelectedLocalAreaId(null);
     } else {
       setSelectedProvinceId(provinceId);
+      setSelectedDistrictName(null);
+      setSelectedLocalAreaId(null);
       const prov = getProvinceById(provinceId);
       if (prov.capitalId) {
         setSelectedCityId(prov.capitalId);
@@ -156,8 +218,21 @@ function App() {
     closeSidebar();
   };
 
+  const handleSelectDistrict = (districtName: string | null) => {
+    setSelectedDistrictName(districtName);
+    setSelectedLocalAreaId(null);
+    closeSidebar();
+  };
+
+  const handleSelectLocalArea = (localAreaId: string) => {
+    setSelectedLocalAreaId(localAreaId);
+    closeSidebar();
+  };
+
   const handleExploreRegion = (regionId: RegionId) => {
     setSelectedProvinceId(regionId);
+    setSelectedDistrictName(null);
+    setSelectedLocalAreaId(null);
     setShowAllCities(true);
   };
 
@@ -170,18 +245,23 @@ function App() {
   const handleSearchChange = (query: string) => {
     setSearchQuery(query);
     if (mode === 'study' && studyTopic) {
-      const matchingItems = filterEducationItems(EDUCATION_STUDY_ITEMS, studyTopic, query);
+      const topicItems = freetownLandmarksOnly
+        ? filterFreetownLandmarks(EDUCATION_STUDY_ITEMS)
+        : EDUCATION_STUDY_ITEMS;
+      const matchingItems = filterEducationItems(topicItems, studyTopic, query);
       setSelectedStudyItemId(matchingItems[0]?.id ?? null);
     }
   };
 
   const handleSelectStudyTopic = (topicId: EducationTopicId) => {
     if (studyTopic === topicId) {
+      setFreetownLandmarksOnly(false);
       setStudyTopic(null);
       setSelectedStudyItemId(null);
       setIsDetailOpen(true);
       return;
     }
+    if (topicId !== 'landmarks') setFreetownLandmarksOnly(false);
     setStudyTopic(topicId);
     const matchingItems = filterEducationItems(EDUCATION_STUDY_ITEMS, topicId, searchQuery);
     setSelectedStudyItemId(matchingItems[0]?.id ?? null);
@@ -190,6 +270,7 @@ function App() {
 
   const handleSelectMode = (nextMode: 'political' | 'study') => {
     setMode(nextMode);
+    if (nextMode === 'political') setFreetownLandmarksOnly(false);
     setIsDetailOpen(true);
     if (nextMode === 'study' && !studyTopic) {
       setStudyTopic('rivers');
@@ -199,6 +280,27 @@ function App() {
     } else if (nextMode === 'study' && !selectedStudyItemId) {
       setSelectedStudyItemId(filteredStudyItems[0]?.id ?? null);
     }
+  };
+
+  const handleToggleFreetownLandmarksOnly = () => {
+    const nextEnabled = !freetownLandmarksOnly;
+    setMode('study');
+    setStudyTopic('landmarks');
+    setFreetownLandmarksOnly(nextEnabled);
+    if (nextEnabled) {
+      setSelectedProvinceId(null);
+      setSelectedDistrictName(null);
+      setSelectedLocalAreaId(null);
+      setSearchQuery('');
+    }
+    const landmarkItems = nextEnabled
+      ? filterFreetownLandmarks(EDUCATION_STUDY_ITEMS)
+      : EDUCATION_STUDY_ITEMS.filter((item) => item.topicId === 'landmarks');
+    setSelectedStudyItemId(
+      filterEducationItems(landmarkItems, 'landmarks', nextEnabled ? '' : searchQuery)[0]?.id ??
+        null
+    );
+    setIsDetailOpen(true);
   };
 
   const handleToggleFavorite = (cityId: string) => {
@@ -248,6 +350,10 @@ function App() {
         cities={filteredCities}
         selectedCityId={selectedCityId}
         selectedProvinceId={selectedProvinceId}
+        selectedDistrictName={selectedDistrictName}
+        localAreas={selectedDistrictLocalAreas}
+        localAreasStatus={localAreasStatus}
+        selectedLocalAreaId={selectedLocalAreaId}
         searchQuery={searchQuery}
         showAllCities={showAllCities}
         activeLayer={activeLayer}
@@ -259,6 +365,8 @@ function App() {
         onSearchChange={handleSearchChange}
         onSelectCity={handleSelectCity}
         onSelectProvince={handleSelectProvince}
+        onSelectDistrict={handleSelectDistrict}
+        onSelectLocalArea={handleSelectLocalArea}
         onToggleShowAllCities={() => setShowAllCities((prev) => !prev)}
         onSelectStudyItem={handleSelectStudyItem}
         onClose={closeSidebar}
@@ -292,9 +400,19 @@ function App() {
           cities={CITIES}
           selectedCity={selectedCity}
           selectedProvinceId={selectedProvinceId}
+          selectedDistrictName={selectedDistrictName}
+          selectedLocalAreaId={selectedLocalAreaId}
+          localAreas={localAreas}
+          localAreasStatus={localAreasStatus}
+          localAreasError={localAreasError}
+          onRetryLocalAreas={() => {
+            setLocalAreasStatus('idle');
+            setLocalAreasRetry((retry) => retry + 1);
+          }}
           isDetailOpen={isDetailOpen}
           mode={mode}
           studyTopic={studyTopic}
+          freetownLandmarksOnly={freetownLandmarksOnly}
           studyItems={filteredStudyItems}
           selectedStudyItemId={selectedStudyItemId}
           activeLayer={activeLayer}
@@ -305,8 +423,11 @@ function App() {
           onPulseTelemetry={handlePulseTelemetry}
           onSelectCity={handleSelectCity}
           onSelectProvince={handleSelectProvince}
+          onSelectDistrict={handleSelectDistrict}
+          onSelectLocalArea={handleSelectLocalArea}
           onSelectMode={handleSelectMode}
           onSelectStudyTopic={handleSelectStudyTopic}
+          onToggleFreetownLandmarksOnly={handleToggleFreetownLandmarksOnly}
           onSelectStudyItem={handleSelectStudyItem}
         />
 
