@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Building2, ChevronRight, Compass, Search, X } from 'lucide-react';
-import { CityData, ProvinceData, RegionId } from '../data/sierraLeoneData';
+import { CityData, PROVINCES, ProvinceData, RegionId } from '../data/sierraLeoneData';
+import { LocalAreaFeature } from '../data/localAreas';
 import {
   EDUCATION_TOPICS,
   EducationStudyItem,
@@ -14,6 +15,10 @@ interface LeftSidebarProps {
   cities: CityData[];
   selectedCityId: string;
   selectedProvinceId: RegionId | null;
+  selectedDistrictName: string | null;
+  localAreas: LocalAreaFeature[];
+  localAreasStatus: 'idle' | 'loading' | 'loaded' | 'error';
+  selectedLocalAreaId: string | null;
   searchQuery: string;
   showAllCities: boolean;
   activeLayer: DataLayerId;
@@ -25,6 +30,8 @@ interface LeftSidebarProps {
   onSearchChange: (q: string) => void;
   onSelectCity: (cityId: string) => void;
   onSelectProvince: (provinceId: RegionId) => void;
+  onSelectDistrict: (districtName: string | null) => void;
+  onSelectLocalArea: (localAreaId: string) => void;
   onToggleShowAllCities: () => void;
   onSelectStudyItem: (itemId: string) => void;
   onClose: () => void;
@@ -36,6 +43,10 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   cities,
   selectedCityId,
   selectedProvinceId,
+  selectedDistrictName,
+  localAreas,
+  localAreasStatus,
+  selectedLocalAreaId,
   searchQuery,
   showAllCities,
   activeLayer,
@@ -47,6 +58,8 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   onSearchChange,
   onSelectCity,
   onSelectProvince,
+  onSelectDistrict,
+  onSelectLocalArea,
   onToggleShowAllCities,
   onSelectStudyItem,
   onClose,
@@ -210,6 +223,80 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
         </nav>
         )}
 
+        {!studyMode && selectedProvinceId && (
+          <section className="mt-2.5 pt-2.5 border-t border-slate-200/70" aria-label="Administrative areas">
+            <div className="flex items-center justify-between px-2 mb-1.5">
+              <h2 className="text-[13.5px] font-bold text-slate-900">
+                {selectedDistrictName
+                  ? `Local areas (${localAreas.length})`
+                  : `${PROVINCES.find((province) => province.id === selectedProvinceId)?.shortName ?? 'Province'} districts`}
+              </h2>
+              {selectedDistrictName ? (
+                <button
+                  type="button"
+                  onClick={() => onSelectDistrict(null)}
+                  className="text-[11px] font-medium text-blue-600 hover:text-blue-800 whitespace-nowrap"
+                >
+                  All districts
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onSelectProvince(selectedProvinceId)}
+                  className="text-[11px] font-medium text-blue-600 hover:text-blue-800 whitespace-nowrap"
+                >
+                  {selectedDistrictName ? 'All districts' : 'All regions'}
+                </button>
+              )}
+            </div>
+            <nav aria-label={selectedDistrictName ? 'Local areas' : 'Districts'} className="max-h-[190px] space-y-0.5 overflow-y-auto pr-1 custom-scrollbar">
+              {selectedDistrictName ? (
+                localAreasStatus === 'idle' || localAreasStatus === 'loading' ? (
+                  <p className="px-2.5 py-3 text-xs text-slate-500">Loading local-area boundaries…</p>
+                ) : localAreasStatus === 'error' ? (
+                  <p className="px-2.5 py-3 text-xs text-rose-700">Local-area boundaries could not be loaded.</p>
+                ) : localAreas.length === 0 ? (
+                  <p className="px-2.5 py-3 text-xs text-slate-500">No local areas match this search.</p>
+                ) : (
+                  localAreas.map((area) => (
+                    <button
+                      key={area.id}
+                      type="button"
+                      onClick={() => onSelectLocalArea(area.id)}
+                      aria-pressed={selectedLocalAreaId === area.id}
+                      className={`w-full rounded-xl px-2.5 py-2 text-left text-[13px] font-medium transition-colors ${
+                        selectedLocalAreaId === area.id
+                          ? 'bg-emerald-50 text-emerald-900'
+                          : 'text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      {area.name}
+                    </button>
+                  ))
+                )
+              ) : (
+                PROVINCES.find((province) => province.id === selectedProvinceId)?.districts
+                  .filter((district) => !searchQuery.trim() || district.toLowerCase().includes(searchQuery.trim().toLowerCase()))
+                  .map((district) => (
+                    <button
+                      key={district}
+                      type="button"
+                      onClick={() => onSelectDistrict(district)}
+                      className="w-full rounded-xl px-2.5 py-2 text-left text-[13px] font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                    >
+                      {district}
+                    </button>
+                  ))
+              )}
+            </nav>
+            {selectedDistrictName && (
+              <p className="mt-1 px-2 text-[10px] leading-snug text-slate-500">
+                Source: HDX Sierra Leone Subnational Administrative Boundaries (COD-AB).
+              </p>
+            )}
+          </section>
+        )}
+
         {studyMode ? (
         <section className="mt-2.5 pt-2.5 border-t border-slate-200/70" aria-label="Study materials">
           <div className="flex items-center justify-between px-2 mb-1.5">
@@ -281,7 +368,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 onClick={() => onSelectProvince(selectedProvinceId)}
                 className="text-[11px] font-medium text-blue-600 hover:text-blue-800 whitespace-nowrap"
               >
-                All regions
+                {selectedDistrictName ? 'All districts' : 'All regions'}
               </button>
             )}
           </div>
