@@ -35,7 +35,8 @@ function getCityPlaceStudyItem(
   cityId: string,
   placeName: string,
   id: string,
-  studyPrompt: string
+  studyPrompt: string,
+  coordinates?: [longitude: number, latitude: number]
 ): EducationStudyItem {
   const city = CITIES.find((candidate) => candidate.id === cityId);
   if (!city) throw new Error(`Unknown city "${cityId}" for education landmark data.`);
@@ -49,7 +50,7 @@ function getCityPlaceStudyItem(
     description: place.description,
     regionId: city.regionId,
     district: city.keyFacts.district,
-    coordinates: [city.lng, city.lat],
+    coordinates: coordinates ?? [city.lng, city.lat],
     studyPrompt,
     status: 'Prototype city-centered marker; exact place location is approximate',
     sourceLabel: `Existing place profile: ${city.name} · ${place.category}`,
@@ -61,8 +62,104 @@ const FOURAH_BAY_COLLEGE_STUDY_ITEM = getCityPlaceStudyItem(
   'freetown',
   'Fourah Bay College',
   'landmark-fourah-bay-college',
-  'Why are educational institutions important landmarks in a country’s history?'
+  'Why are educational institutions important landmarks in a country’s history?',
+  [-13.238, 8.491]
 );
+
+const NATIONAL_MUSEUM_STUDY_ITEM = getCityPlaceStudyItem(
+  'freetown',
+  'Sierra Leone National Museum',
+  'landmark-national-museum',
+  'How can museums help preserve a country’s historical record?',
+  [-13.2337, 8.4848]
+);
+
+const FREETOWN_HISTORIC_LANDMARKS: EducationStudyItem[] = [
+  {
+    id: 'landmark-cotton-tree',
+    name: 'Cotton Tree Memorial',
+    topicId: 'landmarks',
+    description:
+      'The Cotton Tree was a longstanding symbol in central Freetown. This prototype marks its historic city-center location.',
+    regionId: 'western',
+    district: 'Western Area Urban',
+    coordinates: [-13.2344, 8.4847],
+    studyPrompt: 'What can a landmark in a city center represent to its community?',
+    status: 'Prototype map marker; approximate location',
+    sourceLabel: 'Tourism Sierra Leone · Freetown',
+    sourceUrl: 'https://tourismsierraleone.com/where-to-go/freetown/',
+  },
+  {
+    id: 'landmark-kings-gate',
+    name: "King's Gate",
+    topicId: 'landmarks',
+    description:
+      "King's Gate is associated with Freetown's early history. Its map position is an approximate study marker.",
+    regionId: 'western',
+    district: 'Western Area Urban',
+    coordinates: [-13.2308, 8.4877],
+    studyPrompt: 'How can a historic monument help people interpret a city’s past?',
+    status: 'Prototype map marker; approximate location',
+    sourceLabel: 'Tourism Sierra Leone · Freetown',
+    sourceUrl: 'https://tourismsierraleone.com/where-to-go/freetown/',
+  },
+  {
+    id: 'landmark-st-johns-maroon-church',
+    name: "St John's Maroon Church",
+    topicId: 'landmarks',
+    description:
+      'St John’s Maroon Church is part of Freetown’s historic religious heritage. This marker is illustrative, not a surveyed location.',
+    regionId: 'western',
+    district: 'Western Area Urban',
+    coordinates: [-13.2322, 8.4865],
+    studyPrompt: 'What can historic places of worship tell us about a city’s communities?',
+    status: 'Prototype map marker; approximate location',
+    sourceLabel: 'Tourism Sierra Leone · Freetown',
+    sourceUrl: 'https://tourismsierraleone.com/where-to-go/freetown/',
+  },
+  {
+    id: 'landmark-st-georges-cathedral',
+    name: "St George's Cathedral",
+    topicId: 'landmarks',
+    description:
+      'St George’s Cathedral is a historic church in central Freetown. The marker shows an approximate location.',
+    regionId: 'western',
+    district: 'Western Area Urban',
+    coordinates: [-13.2292, 8.4851],
+    studyPrompt: 'How do historic buildings contribute to a city’s cultural landscape?',
+    status: 'Prototype map marker; approximate location',
+    sourceLabel: 'Tourism Sierra Leone · Freetown',
+    sourceUrl: 'https://tourismsierraleone.com/where-to-go/freetown/',
+  },
+  {
+    id: 'landmark-old-fourah-bay-college',
+    name: 'Old Fourah Bay College',
+    topicId: 'landmarks',
+    description:
+      'The former Fourah Bay College building in Cline Town is a historic education site. Its position here is approximate.',
+    regionId: 'western',
+    district: 'Western Area Urban',
+    coordinates: [-13.2118, 8.4887],
+    studyPrompt: 'How can an old school building help preserve educational history?',
+    status: 'Prototype map marker; approximate location',
+    sourceLabel: 'Tourism Sierra Leone · Freetown',
+    sourceUrl: 'https://tourismsierraleone.com/where-to-go/freetown/',
+  },
+  {
+    id: 'landmark-railway-museum',
+    name: 'National Railway Museum',
+    topicId: 'landmarks',
+    description:
+      'The National Railway Museum preserves railway heritage in Freetown. This prototype marker is approximate.',
+    regionId: 'western',
+    district: 'Western Area Urban',
+    coordinates: [-13.2111, 8.4872],
+    studyPrompt: 'What can transport exhibits teach us about a country’s history?',
+    status: 'Prototype map marker; approximate location',
+    sourceLabel: 'Tourism Sierra Leone · Freetown',
+    sourceUrl: 'https://tourismsierraleone.com/where-to-go/freetown/',
+  },
+];
 
 export const EDUCATION_STUDY_ITEMS: EducationStudyItem[] = [
   {
@@ -250,6 +347,8 @@ export const EDUCATION_STUDY_ITEMS: EducationStudyItem[] = [
     sourceUrl: 'https://tourismsierraleone.com/attractions/bunce-island/',
   },
   FOURAH_BAY_COLLEGE_STUDY_ITEM,
+  NATIONAL_MUSEUM_STUDY_ITEM,
+  ...FREETOWN_HISTORIC_LANDMARKS,
   {
     id: 'landmark-tiwai-island',
     name: 'Tiwai Island Wildlife Sanctuary',
