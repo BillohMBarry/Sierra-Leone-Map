@@ -5,7 +5,7 @@ import {
   getEducationItemById,
 } from '../data/educationData';
 import { MAJOR_RIVERS_GEOJSON } from '../data/sierraLeoneGeoJson';
-import { filterEducationItems } from './educationFilters';
+import { filterEducationItems, filterFreetownLandmarks } from './educationFilters';
 
 test('prototype study data includes the five topics and seven candidate rivers', () => {
   assert.deepEqual(
@@ -31,6 +31,17 @@ test('prototype entries include source and status metadata', () => {
     assert.ok(item.sourceLabel, `${item.id} should have a source label`);
     assert.ok(item.sourceUrl.startsWith('https://'), `${item.id} should have a source URL`);
   }
+});
+
+test('Freetown landmark filter returns located historical sites in Western Area Urban only', () => {
+  const landmarks = filterFreetownLandmarks(EDUCATION_STUDY_ITEMS);
+
+  assert.ok(landmarks.length >= 8);
+  assert.ok(landmarks.every((item) => item.topicId === 'landmarks'));
+  assert.ok(landmarks.every((item) => item.regionId === 'western'));
+  assert.ok(landmarks.every((item) => item.district === 'Western Area Urban'));
+  assert.ok(landmarks.every((item) => item.coordinates));
+  assert.equal(landmarks.some((item) => item.id === 'landmark-bunce-island'), false);
 });
 
 test('river study entries identify the regions highlighted by their prototype paths', () => {
