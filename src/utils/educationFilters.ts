@@ -28,3 +28,13 @@ export function filterEducationItems(
     ].some((value) => value?.toLowerCase().includes(query));
   });
 }
+
+export function filterFreetownLandmarks(items: EducationStudyItem[]): EducationStudyItem[] {
+  return items.filter(
+    (item) =>
+      item.topicId === 'landmarks' &&
+      item.regionId === 'western' &&
+      item.district === 'Western Area Urban' &&
+      item.coordinates !== undefined
+  );
+}
